@@ -53,12 +53,9 @@ SOURCES = [
     ("phonsobon/khmer_auto_complete_v4", "text", "train", 15_000),
     ("phonsobon/khmer-word-segmentation", "sentence", "train", 10_000),
     ("phonsobon/Text_Emotional_kh", "text", "train", 10_000),
-    # government news (13 ministry websites); its first 200k rows are balanced across the websites
+    # government news (13 ministry websites, Khmer only); its first 200k rows are balanced across the websites
     ("phonsobon/khmer-gov-news", "text", "train", 200_000),
-    # Khmer sentences with a few English words (JICA, WTO, names), as people really write
-    ("phonsobon/khmer-gov-news", "text", "mixed", 30_000),
 ]
-MIXED = {("phonsobon/khmer-gov-news", "mixed")}       # (dataset, split) whose English words are kept
 if os.environ.get("KHSPELL_TEST_SOURCES"):      # tiny sources for automated tests only
     SOURCES = [("seanghay/khmer-dictionary-44k", "example", "train", 1500),
                ("CADT-IDRI/Khmer_News_classification_unsegmented", "content", "train", 1500),
@@ -89,9 +86,8 @@ def chunk(sent):
     return [c for c in out if len(c) <= MAX_CHARS]
 
 
-def sentences(text, segmented=False, stats=None, allow_latin=False):
-    """Clean Khmer-only sentences from one document; `stats` counts why pieces were dropped.
-    allow_latin: keep a few English words inside a Khmer sentence (khspell.clean)."""
+def sentences(text, segmented=False, stats=None):
+    """Clean Khmer-only sentences from one document; `stats` counts why pieces were dropped."""
     text = _JUNK.sub(" ", _WIKI_LINK.sub(r"\1", text))
     if segmented:
         text = _SEG_SPACE.sub("", text)
@@ -106,7 +102,7 @@ def sentences(text, segmented=False, stats=None, allow_latin=False):
                 stats["markup/code"] += 1
             continue
         for c in chunk(s):
-            c, reason = clean_sentence(c, allow_latin)
+            c, reason = clean_sentence(c)
             if stats is not None:
                 stats[reason] += 1
             if c and len(c) >= MIN_CHARS:
@@ -127,10 +123,10 @@ def clean_and_tokenize(task):
     """Worker: documents -> [(sentence, word tokens)] plus counts of what was dropped."""
     from khmernltk import word_tokenize
 
-    docs, segmented, allow_latin = task
+    docs, segmented = task
     stats, out = collections.Counter(), []
     for doc in docs:
-        for s in sentences(doc, segmented, stats, allow_latin):
+        for s in sentences(doc, segmented, stats):
             toks = word_tokenize(s)
             if "".join(toks) == s:
                 out.append((s, toks))
@@ -139,17 +135,17 @@ def clean_and_tokenize(task):
     return out, stats
 
 
-def doc_tasks(texts, segmented, allow_latin=False, chars_per_task=200_000):
+def doc_tasks(texts, segmented, chars_per_task=200_000):
     """Group documents into tasks of roughly equal size for the process pool."""
     batch, size = [], 0
     for t in texts:
         batch.append(t)
         size += len(t)
         if size >= chars_per_task:
-            yield batch, segmented, allow_latin
+            yield batch, segmented
             batch, size = [], 0
     if batch:
-        yield batch, segmented, allow_latin
+        yield batch, segmented
 
 
 def download_all(parallel=2, attempts=6):
@@ -217,9 +213,8 @@ def main():
         for ds_id, col, split, cap in SOURCES:
             cap = int(cap * args.scale)
             kept, stats = 0, collections.Counter()
-            tasks = doc_tasks(hf.iter_local_text(paths[(ds_id, split)], col), ds_id in SEGMENTED,
-                              (ds_id, split) in MIXED)
-            bar = tqdm(total=cap, desc=f"  {ds_id.split('/')[-1]}[{split}]", mininterval=5)
+            tasks = doc_tasks(hf.iter_local_text(paths[(ds_id, split)], col), ds_id in SEGMENTED)
+            bar = tqdm(total=cap, desc=f"  {ds_id.split('/')[-1]}[{col}]", mininterval=5)
             while kept < cap:
                 wave = [t for _, t in zip(range(args.workers * 2), tasks)]   # bounded: never reads ahead far
                 if not wave:
@@ -238,7 +233,7 @@ def main():
                         bar.update()
             bar.close()
             dropped = ", ".join(f"{r} {n:,}" for r, n in stats.most_common() if r != "ok")
-            print(f"  {ds_id}[{split}/{col}]: {kept:,} kept | dropped: {dropped or 'none'}", flush=True)
+            print(f"  {ds_id}[{col}]: {kept:,} kept | dropped: {dropped or 'none'}", flush=True)
 
     print("\n[3/4] mining real misspellings from human-corrected sentences ...", flush=True)
     real_paths = paths[(real_typos.REAL_PAIRS_ID, real_typos.REAL_PAIRS_SPLIT)]

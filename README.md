@@ -59,9 +59,7 @@ Real Khmer typos are rare, so the models learn from **clean sentences with reali
 - keyboard noise (`ណាស់ស់ស់ស់`), duplicates and very short lines are removed.
 
 **Government news** (`phonsobon/khmer-gov-news`, 13 ministry websites): 200k Khmer-only sentences, balanced
-across the websites, plus 30k Khmer sentences that contain a few English words (`ជំនួបជាមួយ JICA`). Those are
-kept as people really write them, so the tagger learns to cut Khmer around English; English words are never
-misspelled on purpose and never checked.
+across the websites.
 
 **Names** (people, places, organizations) are not misspellings. An unknown word right after a title or
 head word (`លោក ដារ៉ា`, `ខេត្ត តូក្យូ`, `ធនាគារ អេស៊ីលីដា`) is treated as a name (`khspell/names.py`): it is
