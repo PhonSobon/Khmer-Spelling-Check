@@ -9,6 +9,8 @@ Other options:  --no-push (don't upload)  --retrain (train all models again)
 
 Steps. Finished steps are skipped when you run the command again, and an interrupted
 ByT5 training continues from its last checkpoint, so after any error: fix it and rerun.
+A model trained for an older data / dictionary version (<model>.version) is trained again
+from scratch, also when it was restored from an earlier Kaggle session.
     1. check GPU (+ Hugging Face upload access)
     2. prepare data: download datasets, keep clean Khmer sentences   scripts/prepare_data.py
     3. lexicon: dictionary + frequent words of the data               scripts/build_lexicon.py
@@ -22,7 +24,9 @@ The full run also uploads the models to the public Hugging Face repo
 phonsobon/khmer-spell-checker (log in with a write token: HF_TOKEN in .env or huggingface-cli login).
 """
 import argparse
+import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -65,6 +69,28 @@ def skip(name, reason):
     print(f"\n>>> {name}: skipped ({reason})", flush=True)
 
 
+# ---- model versions: <model>.version = {"version": what it is trained on, "done": finished?}
+def read_stamp(model):
+    try:
+        return json.loads(Path(f"{model}.version").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def write_stamp(model, **stamp):
+    Path(f"{model}.version").write_text(json.dumps(stamp, ensure_ascii=False), encoding="utf-8")
+
+
+def plan(name, model, version, retrain, finished):
+    """(train?, from scratch?). From scratch when the model was trained for another version
+    (or --retrain); again (continuing) when it is missing or unfinished."""
+    st = read_stamp(model)
+    fresh = retrain or st.get("version") != version
+    if fresh and not retrain and finished:
+        print(f"\n({name}: trained for {st.get('version') or 'an older version'}, now {version}: training again)")
+    return fresh or not st.get("done") or not finished, fresh
+
+
 def check_hub(repo):
     """Fail in seconds (not after hours of training) if the token cannot upload to `repo`."""
     from huggingface_hub import HfApi, get_token
@@ -82,17 +108,28 @@ def check_hub(repo):
     print(f"    Hugging Face: logged in as {user}, models go to https://huggingface.co/{repo} (public)")
 
 
-def fetch_last_checkpoint(repo, out_dir):
-    """Download the ByT5 checkpoint the trainer pushed (last-checkpoint/) if it is newer than the local ones."""
-    import json
-    import shutil
+def hub_checkpoint_id(repo):
+    """Id of the ByT5 checkpoint in last-checkpoint/ of `repo` (None: no checkpoint)."""
+    from huggingface_hub import HfApi
 
-    from huggingface_hub import HfApi, hf_hub_download, snapshot_download
+    try:
+        info = HfApi(token=os.environ.get("HF_TOKEN")).get_paths_info(repo, ["last-checkpoint/trainer_state.json"])
+    except Exception as e:
+        print(f"    (could not check {repo} for a checkpoint: {e})")
+        return None
+    return info[0].blob_id if info else None
+
+
+def fetch_last_checkpoint(repo, out_dir, skip_id=None):
+    """Download the ByT5 checkpoint the trainer pushed (last-checkpoint/) if it is newer than the local ones.
+    `skip_id`: a checkpoint of an older data version, never continued from."""
+    from huggingface_hub import hf_hub_download, snapshot_download
 
     token = os.environ.get("HF_TOKEN")
+    ckpt_id = hub_checkpoint_id(repo)
+    if ckpt_id is None or ckpt_id == skip_id:
+        return
     try:
-        if "last-checkpoint/trainer_state.json" not in HfApi(token=token).list_repo_files(repo):
-            return
         with open(hf_hub_download(repo, "last-checkpoint/trainer_state.json", token=token), encoding="utf-8") as f:
             hub_step = json.load(f)["global_step"]
     except Exception as e:
@@ -168,28 +205,47 @@ def main():
         skip("3/7 Build lexicon", "up to date")
 
     # 4 --------------------------------------------------------------------------
-    if args.retrain or not config.G2P_CKPT.exists() or resume.unfinished(config.G2P_CKPT):
-        run("4/7 Train G2P", "scripts/train_g2p.py", "--epochs", 100, *(["--fresh"] if args.retrain else []))
+    g2p_version = f"pron={config.PRON_DICT_ID}"
+    train, fresh = plan("G2P", config.G2P_CKPT, g2p_version, args.retrain,
+                        config.G2P_CKPT.exists() and not resume.unfinished(config.G2P_CKPT))
+    if train:
+        if fresh:
+            resume.finish(config.G2P_CKPT)                 # drop a resume state of the old version
+        write_stamp(config.G2P_CKPT, version=g2p_version, done=False)
+        run("4/7 Train G2P", "scripts/train_g2p.py", "--epochs", 100, *(["--fresh"] if fresh else []))
+        write_stamp(config.G2P_CKPT, version=g2p_version, done=True)
         changed = True
     else:
-        skip("4/7 Train G2P", "g2p.pt exists")
+        skip("4/7 Train G2P", f"g2p.pt is up to date ({g2p_version})")
     if changed or not config.PRON_TSV.exists():
         run("4/7 Pronunciations of the lexicon words", "scripts/build_pron.py")
 
     # 5 --------------------------------------------------------------------------
-    if args.retrain or not tagger_pt.exists() or resume.unfinished(tagger_pt):
+    train, fresh = plan("character tagger", tagger_pt, data_version, args.retrain,
+                        tagger_pt.exists() and not resume.unfinished(tagger_pt))
+    if train:
+        if fresh:
+            resume.finish(tagger_pt)
+        write_stamp(tagger_pt, version=data_version, done=False)
         run("5/7 Train character tagger", "scripts/train_tagger.py", "--out", tagger_pt,
-            *(["--epochs", 1, "--limit", 60000] if q else []), *(["--fresh"] if args.retrain else []))
+            *(["--epochs", 1, "--limit", 60000] if q else []), *(["--fresh"] if fresh else []))
+        write_stamp(tagger_pt, version=data_version, done=True)
         changed = True
     else:
-        skip("5/7 Train character tagger", f"{tagger_pt.name} exists")
+        skip("5/7 Train character tagger", f"{tagger_pt.name} is up to date")
 
     # 6 --------------------------------------------------------------------------
-    if args.retrain or not (topk_dir / "config.json").exists():
+    train, fresh = plan("ByT5", topk_dir, data_version, args.retrain, (topk_dir / "config.json").exists())
+    if train:
         train_args = ["--model", args.model, "--max-steps", steps, "--out", topk_dir]
-        if hub_repo and not args.retrain:
-            fetch_last_checkpoint(hub_repo, topk_dir)     # e.g. a new Kaggle session: continue from the hub
-        if not args.retrain and any(topk_dir.glob("checkpoint-*")):
+        if fresh:                                        # old model and checkpoints: start over
+            shutil.rmtree(topk_dir, ignore_errors=True)
+            skip_id = hub_checkpoint_id(hub_repo) if hub_repo else None
+            write_stamp(topk_dir, version=data_version, done=False, skip_hub_checkpoint=skip_id)
+        skip_id = read_stamp(topk_dir).get("skip_hub_checkpoint")
+        if hub_repo:
+            fetch_last_checkpoint(hub_repo, topk_dir, skip_id)   # e.g. a new Kaggle session: continue from the hub
+        if any(topk_dir.glob("checkpoint-*")):
             train_args.append("--resume")
             print("\n(checkpoints found: ByT5 training continues where it stopped)")
         if q:
@@ -200,6 +256,7 @@ def main():
             train_args += ["--per-device-batch", args.per_device_batch]
         import torch
         run("6/7 Train ByT5 model", "scripts/train_topk.py", *train_args, gpus=max(1, torch.cuda.device_count()))
+        write_stamp(topk_dir, version=data_version, done=True)
         changed = True
     else:
         skip("6/7 Train ByT5 model", f"{topk_dir.name} is finished")
