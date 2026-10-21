@@ -37,6 +37,8 @@ sys.path.insert(0, str(ROOT))
 from khspell import config, resume  # noqa: E402  (config also loads .env)
 
 DEFAULT_HUB_REPO = "phonsobon/khmer-spell-checker"
+TAGGER_EPOCHS = 6       # 3 was not enough: the dev scores still rose a lot in epoch 3 (seg F1 0.719 -> 0.757)
+TAGGER_LR = 3e-4        # 5e-4 kept the loss flat for the whole first epoch
 DATA_VERSION_FILE = config.DATA_DIR / "VERSION.txt"
 
 
@@ -221,15 +223,17 @@ def main():
         run("4/7 Pronunciations of the lexicon words", "scripts/build_pron.py")
 
     # 5 --------------------------------------------------------------------------
-    train, fresh = plan("character tagger", tagger_pt, data_version, args.retrain,
+    tagger_args = ["--epochs", 1, "--limit", 60000] if q else ["--epochs", TAGGER_EPOCHS, "--lr", TAGGER_LR]
+    tagger_version = f"{data_version} tagger=epochs{tagger_args[1]}-lr{TAGGER_LR}"   # new settings: train again
+    train, fresh = plan("character tagger", tagger_pt, tagger_version, args.retrain,
                         tagger_pt.exists() and not resume.unfinished(tagger_pt))
     if train:
         if fresh:
             resume.finish(tagger_pt)
-        write_stamp(tagger_pt, version=data_version, done=False)
+        write_stamp(tagger_pt, version=tagger_version, done=False)
         run("5/7 Train character tagger", "scripts/train_tagger.py", "--out", tagger_pt,
-            *(["--epochs", 1, "--limit", 60000] if q else []), *(["--fresh"] if fresh else []))
-        write_stamp(tagger_pt, version=data_version, done=True)
+            *tagger_args, *(["--fresh"] if fresh else []))
+        write_stamp(tagger_pt, version=tagger_version, done=True)
         changed = True
     else:
         skip("5/7 Train character tagger", f"{tagger_pt.name} is up to date")

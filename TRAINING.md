@@ -20,7 +20,7 @@ Everything is trained with **one command: `python main.py`**. It takes about **4
 | 1 | Training data (~900k clean, Khmer-only sentences) | text to learn from; English, emoji and markup removed | 20-40 min |
 | 2 | Lexicon (dictionary + corpus words) | keeps only **real words** in the suggestions | 10-20 min |
 | 3 | **G2P** (Transformer, word → pronunciation) | finds **same-sound** spellings (ចំរៀង → ចម្រៀង); 100 epochs, best dev checkpoint kept | ~20-30 min |
-| 4 | **Character tagger** (Transformer, per character) | **cuts words and marks the misspelled ones** | 20-40 min |
+| 4 | **Character tagger** (Transformer, per character) | **cuts words and marks the misspelled ones** | 40-80 min (Kaggle T4: ~4 h) |
 | 5 | **ByT5-small** (seq2seq, word in context) | proposes corrections using the sentence context | 2-3 h |
 | 6 | Ranking weights (tuned) + evaluation | combines everything into the final top-3 | 20-30 min |
 

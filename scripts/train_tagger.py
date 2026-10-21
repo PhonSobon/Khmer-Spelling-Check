@@ -2,7 +2,7 @@
 
 Needs outputs/data/train.parquet from scripts/prepare_data.py.
 
-    python scripts/train_tagger.py                 # RTX 3090: ~20-40 min
+    python scripts/train_tagger.py                 # 6 epochs. RTX 3090: ~40-80 min, Kaggle T4: ~4 h
     python scripts/train_tagger.py --epochs 1 --limit 20000   # quick test
 
 Reports on a fixed dev set:
@@ -68,9 +68,9 @@ def evaluate(tagger, dev):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(config.TAGGER_CKPT))
-    ap.add_argument("--epochs", type=int, default=3)
+    ap.add_argument("--epochs", type=int, default=6)
     ap.add_argument("--batch", type=int, default=256)
-    ap.add_argument("--lr", type=float, default=5e-4)
+    ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--d-model", type=int, default=256)
     ap.add_argument("--layers", type=int, default=6)
     ap.add_argument("--limit", type=int, default=0, help="use only N sentences (quick test)")
