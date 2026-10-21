@@ -146,7 +146,7 @@ def _is_known():
     return _known
 
 
-N_ERRORS =[(0, 0.15), (1, 0.35), (2, 0.25), (3, 0.15), (4, 0.10)]   # errors per sentence
+N_ERRORS = [(0, 0.15), (1, 0.35), (2, 0.25), (3, 0.15), (4, 0.10)]   # errors per sentence
 
 
 def noisy_tokens(tokens, rng=random, n_errors=None):
