@@ -201,7 +201,7 @@ The same works on your PC: rerun `python main.py` after an interruption.
 
 | Problem | Fix |
 |---|---|
-| `CUDA out of memory` in ByT5 | `PER_DEVICE_BATCH = 8` |
+| `CUDA out of memory` in ByT5 | `PER_DEVICE_BATCH = 4` (default 8) |
 | ByT5 hangs at the start with 2 GPUs | add `env["NCCL_P2P_DISABLE"] = "1"` in the train cell |
 | `Repository not found` when cloning | private repo: add the `GITHUB_TOKEN` secret |
 

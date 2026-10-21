@@ -164,7 +164,7 @@ def main():
     ap.add_argument("--steps", type=int, default=None, help="ByT5 training steps (default 30000, quick 3000)")
     ap.add_argument("--model", default="google/byt5-small", help="base model, e.g. google/byt5-base")
     ap.add_argument("--per-device-batch", type=int, default=None,
-                    help="ByT5 batch per GPU (default 64; 16 for 16 GB GPUs like T4). Total batch stays 64")
+                    help="ByT5 batch per GPU (default 64; 8 for 15 GB GPUs like T4). Total batch stays 64")
     ap.add_argument("--push-to-hub", default=None, help=f"Hugging Face repo (default {DEFAULT_HUB_REPO})")
     ap.add_argument("--no-push", action="store_true", help="do not upload anything")
     ap.add_argument("--serve", action="store_true", help="start the API at the end")

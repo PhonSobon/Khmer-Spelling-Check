@@ -46,6 +46,7 @@ def main():
 
     tok = AutoTokenizer.from_pretrained(args.model)
     model = AutoModelForSeq2SeqLM.from_pretrained(args.model)
+    model.config.use_cache = False               # no decoder cache while training: it only costs GPU memory
 
     df = pd.read_parquet(config.TRAIN_DATA, columns=["tokens"])
     if args.scale_test:
@@ -117,6 +118,7 @@ def main():
                              data_collator=DataCollatorForSeq2Seq(tok, model=model), processing_class=tok,
                              compute_metrics=compute_metrics)
     trainer.train(resume_from_checkpoint=True if args.resume else None)
+    model.config.use_cache = True                # the saved model generates fast again
     trainer.save_model(args.out)
     if trainer.is_world_process_zero():
         tok.save_pretrained(args.out)
