@@ -18,8 +18,8 @@ ByT5 training continues from its last checkpoint, so after any error: fix it and
     7. tune the top-k ranking + evaluate                              scripts/eval_topk.py
 
 Everything is written to outputs/ (the log with all results: outputs/main.log).
-The full run also uploads the models to the private Hugging Face repo
-phonsobon/khmer-topk-speller (HF_TOKEN with write permission in .env).
+The full run also uploads the models to the public Hugging Face repo
+phonsobon/khmer-spell-checker (log in with a write token: HF_TOKEN in .env or huggingface-cli login).
 """
 import argparse
 import os
@@ -30,15 +30,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-from khspell import config  # noqa: E402  (also loads .env)
+from khspell import config, resume  # noqa: E402  (config also loads .env)
 
-DEFAULT_HUB_REPO = "phonsobon/khmer-topk-speller"
+DEFAULT_HUB_REPO = "phonsobon/khmer-spell-checker"
 DATA_VERSION_FILE = config.DATA_DIR / "VERSION.txt"
 
 
-def run(name, script, *args):
-    cmd = [sys.executable, "-u", str(ROOT / script), *map(str, args)]
-    print(f"\n{'=' * 70}\n>>> {name}\n    python {' '.join(cmd[2:])}\n{'=' * 70}", flush=True)
+def run(name, script, *args, gpus=1):
+    launch = [sys.executable, "-u"]
+    if gpus > 1:                       
+        launch = [sys.executable, "-u", "-m", "torch.distributed.run", "--standalone", f"--nproc_per_node={gpus}"]
+    cmd = [*launch, str(ROOT / script), *map(str, args)]
+    shown = f"torchrun --nproc_per_node={gpus}" if gpus > 1 else "python"
+    print(f"\n{'=' * 70}\n>>> {name}\n    {shown} {' '.join(cmd[len(launch):])}\n{'=' * 70}", flush=True)
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     start = time.time()
     with open(config.LOG, "a", encoding="utf-8") as log:
@@ -63,18 +67,46 @@ def skip(name, reason):
 
 def check_hub(repo):
     """Fail in seconds (not after hours of training) if the token cannot upload to `repo`."""
-    from huggingface_hub import HfApi
+    from huggingface_hub import HfApi, get_token
 
-    token = os.environ.get("HF_TOKEN")
+    token = os.environ.get("HF_TOKEN") or get_token()     # .env, or notebook_login / huggingface-cli login
     if not token:
-        sys.exit("!!! HF_TOKEN missing: add HF_TOKEN=hf_... to .env, or run with --no-push")
+        sys.exit("!!! Not logged in to Hugging Face: add HF_TOKEN=hf_... to .env, run huggingface-cli login "
+                 "(notebook_login() in a notebook), or use --no-push")
     try:
         api = HfApi(token=token)
         user = api.whoami()["name"]
-        api.create_repo(repo, private=True, exist_ok=True)
+        api.create_repo(repo, private=False, exist_ok=True)
     except Exception as e:
         sys.exit(f"!!! Cannot upload to {repo}: {e}\n    The token needs WRITE permission, or use --no-push")
-    print(f"    Hugging Face: logged in as {user}, models go to https://huggingface.co/{repo} (private)")
+    print(f"    Hugging Face: logged in as {user}, models go to https://huggingface.co/{repo} (public)")
+
+
+def fetch_last_checkpoint(repo, out_dir):
+    """Download the ByT5 checkpoint the trainer pushed (last-checkpoint/) if it is newer than the local ones."""
+    import json
+    import shutil
+
+    from huggingface_hub import HfApi, hf_hub_download, snapshot_download
+
+    token = os.environ.get("HF_TOKEN")
+    try:
+        if "last-checkpoint/trainer_state.json" not in HfApi(token=token).list_repo_files(repo):
+            return
+        with open(hf_hub_download(repo, "last-checkpoint/trainer_state.json", token=token), encoding="utf-8") as f:
+            hub_step = json.load(f)["global_step"]
+    except Exception as e:
+        print(f"    (could not check {repo} for a checkpoint: {e})")
+        return
+    local = [int(p.name.rsplit("-", 1)[-1]) for p in out_dir.glob("checkpoint-*") if (p / "trainer_state.json").exists()]
+    if local and max(local) >= hub_step:
+        return
+    print(f"\n(downloading the ByT5 checkpoint of step {hub_step:,} from {repo}: training continues from there)")
+    tmp = out_dir / "_hub_download"
+    snapshot_download(repo, allow_patterns="last-checkpoint/*", local_dir=tmp, token=token)
+    shutil.rmtree(out_dir / f"checkpoint-{hub_step}", ignore_errors=True)
+    shutil.move(str(tmp / "last-checkpoint"), str(out_dir / f"checkpoint-{hub_step}"))
+    shutil.rmtree(tmp, ignore_errors=True)
 
 
 def upload_extras(repo, files):
@@ -94,6 +126,8 @@ def main():
     ap.add_argument("--rebuild-data", action="store_true", help="prepare the data (and lexicon) again")
     ap.add_argument("--steps", type=int, default=None, help="ByT5 training steps (default 30000, quick 3000)")
     ap.add_argument("--model", default="google/byt5-small", help="base model, e.g. google/byt5-base")
+    ap.add_argument("--per-device-batch", type=int, default=None,
+                    help="ByT5 batch per GPU (default 64; 16 for 16 GB GPUs like T4). Total batch stays 64")
     ap.add_argument("--push-to-hub", default=None, help=f"Hugging Face repo (default {DEFAULT_HUB_REPO})")
     ap.add_argument("--no-push", action="store_true", help="do not upload anything")
     ap.add_argument("--serve", action="store_true", help="start the API at the end")
@@ -134,8 +168,8 @@ def main():
         skip("3/7 Build lexicon", "up to date")
 
     # 4 --------------------------------------------------------------------------
-    if args.retrain or not config.G2P_CKPT.exists():
-        run("4/7 Train G2P", "scripts/train_g2p.py", "--epochs", 30)
+    if args.retrain or not config.G2P_CKPT.exists() or resume.unfinished(config.G2P_CKPT):
+        run("4/7 Train G2P", "scripts/train_g2p.py", "--epochs", 100, *(["--fresh"] if args.retrain else []))
         changed = True
     else:
         skip("4/7 Train G2P", "g2p.pt exists")
@@ -143,9 +177,9 @@ def main():
         run("4/7 Pronunciations of the lexicon words", "scripts/build_pron.py")
 
     # 5 --------------------------------------------------------------------------
-    if args.retrain or not tagger_pt.exists():
+    if args.retrain or not tagger_pt.exists() or resume.unfinished(tagger_pt):
         run("5/7 Train character tagger", "scripts/train_tagger.py", "--out", tagger_pt,
-            *(["--epochs", 1, "--limit", 60000] if q else []))
+            *(["--epochs", 1, "--limit", 60000] if q else []), *(["--fresh"] if args.retrain else []))
         changed = True
     else:
         skip("5/7 Train character tagger", f"{tagger_pt.name} exists")
@@ -153,6 +187,8 @@ def main():
     # 6 --------------------------------------------------------------------------
     if args.retrain or not (topk_dir / "config.json").exists():
         train_args = ["--model", args.model, "--max-steps", steps, "--out", topk_dir]
+        if hub_repo and not args.retrain:
+            fetch_last_checkpoint(hub_repo, topk_dir)     # e.g. a new Kaggle session: continue from the hub
         if not args.retrain and any(topk_dir.glob("checkpoint-*")):
             train_args.append("--resume")
             print("\n(checkpoints found: ByT5 training continues where it stopped)")
@@ -160,7 +196,10 @@ def main():
             train_args.append("--scale-test")
         if hub_repo:
             train_args += ["--push-to-hub", hub_repo]
-        run("6/7 Train ByT5 model", "scripts/train_topk.py", *train_args)
+        if args.per_device_batch:
+            train_args += ["--per-device-batch", args.per_device_batch]
+        import torch
+        run("6/7 Train ByT5 model", "scripts/train_topk.py", *train_args, gpus=max(1, torch.cuda.device_count()))
         changed = True
     else:
         skip("6/7 Train ByT5 model", f"{topk_dir.name} is finished")

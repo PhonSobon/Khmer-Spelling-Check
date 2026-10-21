@@ -21,7 +21,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from khspell import config
+from khspell import config, resume
 from khspell.noise import noisy_tokens
 from khspell.tagger import IGNORE, PAD_ID, CharTagger, CharVocab, Tagger, make_example, pad
 
@@ -76,12 +76,14 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="use only N sentences (quick test)")
     ap.add_argument("--n-dev", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--state-every", type=int, default=2000, help="save a resume state every N steps")
+    ap.add_argument("--fresh", action="store_true", help="ignore a saved resume state and start over")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    use_bf16 = device == "cuda" and torch.cuda.is_bf16_supported()
+    use_bf16 = config.bf16_ok()
 
     df = pd.read_parquet(config.TRAIN_DATA, columns=["tokens"])
     if args.limit:
@@ -105,14 +107,27 @@ def main():
     def save():
         torch.save({"model": model.state_dict(), "config": cfg, "itos": vocab.itos}, args.out)
 
-    best = -1.0
-    step = 0
-    for ep in range(1, args.epochs + 1):
+    best, step, start_ep, start_b, order = -1.0, 0, 1, 0, None
+    st = resume.load(args.out, args.fresh)
+    if st:
+        model.load_state_dict(st["model"])
+        opt.load_state_dict(st["opt"])
+        sched.load_state_dict(st["sched"])
+        rng.setstate(st["rng"])
+        best, step, start_ep, start_b, order = st["best"], st["step"], st["epoch"], st["next_b"], st["order"]
+        print(f"resuming from step {step:,} (epoch {start_ep}, sentence {start_b:,})", flush=True)
+
+    def save_state(ep, next_b, order):
+        resume.save(args.out, model=model.state_dict(), opt=opt.state_dict(), sched=sched.state_dict(),
+                    rng=rng.getstate(), best=best, step=step, epoch=ep, next_b=next_b, order=order)
+
+    for ep in range(start_ep, args.epochs + 1):
         model.train()
-        order = list(range(len(train)))
-        rng.shuffle(order)
+        if order is None:
+            order = list(range(len(train)))
+            rng.shuffle(order)
         t0 = time.time()
-        for b in range(0, len(order), args.batch):
+        for b in range(start_b, len(order), args.batch):
             batch = [make_example(train[i], rng) for i in order[b:b + args.batch]]
             x, yb, ye = encode_batch(batch, vocab, device)
             with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=use_bf16):
@@ -131,6 +146,9 @@ def main():
                 eta = (time.time() - t0) / done * (1 - done) / 60
                 print(f"epoch {ep} step {step:6d}/{args.epochs * steps_per_epoch}  loss {loss.item():.4f}  "
                       f"(epoch eta {eta:.1f} min)", flush=True)
+            if step % args.state_every == 0:
+                save_state(ep, b + args.batch, order)
+        start_b = 0
         model.eval()
         m = evaluate(Tagger(model, vocab, device), dev)
         print(f"== epoch {ep}: seg F1 {m['seg_f1']:.3f} | error P {m['err_p']:.3f} R {m['err_r']:.3f} "
@@ -139,6 +157,9 @@ def main():
             best = m["seg_f1"] + m["err_f1"]
             save()
             print(f"   saved best -> {args.out}")
+        order = None
+        save_state(ep + 1, 0, None)
+    resume.finish(args.out)
 
 
 if __name__ == "__main__":

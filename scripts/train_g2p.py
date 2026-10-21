@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import torch
 import torch.nn as nn
 
-from khspell import config, hf
+from khspell import config, hf, resume
 from khspell.distance import levenshtein
 from khspell.g2p import G2P, PAD, CharVocab, Seq2SeqTransformer, pad_batch
 from khspell.normalize import is_khmer_word, normalize
@@ -54,6 +54,7 @@ def main():
     ap.add_argument("--lr", type=float, default=7e-4)
     ap.add_argument("--seed", type=int, default=13)
     ap.add_argument("--limit", type=int, default=0, help="use only N word pairs (quick test)")
+    ap.add_argument("--fresh", action="store_true", help="ignore a saved resume state and start over")
     args = ap.parse_args()
 
     random.seed(args.seed)
@@ -84,8 +85,15 @@ def main():
         torch.save({"model": model.state_dict(), "config": cfg,
                     "src_itos": src_v.itos, "tgt_itos": tgt_v.itos}, path)
 
-    best = float("inf")
-    for ep in range(1, args.epochs + 1):
+    best, start_ep = float("inf"), 1
+    st = resume.load(config.G2P_CKPT, args.fresh)      # after the data split: the split never changes
+    if st:
+        model.load_state_dict(st["model"])
+        opt.load_state_dict(st["opt"])
+        sched.load_state_dict(st["sched"])
+        best, start_ep = st["best"], st["epoch"] + 1
+        print(f"resuming after epoch {st['epoch']} (best dev CER so far {best:.3%})", flush=True)
+    for ep in range(start_ep, args.epochs + 1):
         model.train()
         random.shuffle(train)
         t0, total = time.time(), 0.0
@@ -112,6 +120,9 @@ def main():
                 save(config.G2P_CKPT)
         else:
             print(f"epoch {ep:3d}  loss {total / len(train):.4f}  ({time.time() - t0:.0f}s)", flush=True)
+        resume.save(config.G2P_CKPT, model=model.state_dict(), opt=opt.state_dict(), sched=sched.state_dict(),
+                    best=best, epoch=ep)
+    resume.finish(config.G2P_CKPT)
 
     g2p = G2P.load(config.G2P_CKPT, device)
     m = evaluate(g2p, test)

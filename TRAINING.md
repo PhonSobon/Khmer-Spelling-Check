@@ -19,7 +19,7 @@ Everything is trained with **one command: `python main.py`**. It takes about **4
 |---|---|---|---|
 | 1 | Training data (~900k clean, Khmer-only sentences) | text to learn from; English, emoji and markup removed | 20-40 min |
 | 2 | Lexicon (dictionary + corpus words) | keeps only **real words** in the suggestions | 10-20 min |
-| 3 | **G2P** (Transformer, word → pronunciation) | finds **same-sound** spellings (ចំរៀង → ចម្រៀង) | ~10 min |
+| 3 | **G2P** (Transformer, word → pronunciation) | finds **same-sound** spellings (ចំរៀង → ចម្រៀង); 100 epochs, best dev checkpoint kept | ~20-30 min |
 | 4 | **Character tagger** (Transformer, per character) | **cuts words and marks the misspelled ones** | 20-40 min |
 | 5 | **ByT5-small** (seq2seq, word in context) | proposes corrections using the sentence context | 2-3 h |
 | 6 | Ranking weights (tuned) + evaluation | combines everything into the final top-3 | 20-30 min |
@@ -65,7 +65,7 @@ Create `.env` in the project folder:
 HF_TOKEN=hf_xxxxxxxxxxxxxxxxx
 ```
 
-The token needs **write** permission, because the models are uploaded to the private repo `phonsobon/khmer-topk-speller`.
+The token needs **write** permission, because the models are uploaded to the public repo `phonsobon/khmer-spell-checker`.
 
 ## 4. Train
 
@@ -158,7 +158,7 @@ sp.suggest("សំណើរ", k=3)
 | `rank_weights.json` | tuned ranking weights |
 | `main.log` | full log of every step, including the results |
 
-With uploading on, the ByT5 model is in the repo root of `phonsobon/khmer-topk-speller`, and the other files are in its `speller/` folder.
+With uploading on, the ByT5 model is in the repo root of `phonsobon/khmer-spell-checker`, and the other files are in its `speller/` folder.
 
 ## Troubleshooting
 
@@ -170,6 +170,40 @@ With uploading on, the ByT5 model is in the repo root of `phonsobon/khmer-topk-s
 | `ConnectionError` / `WinError 10038` | temporary network error: run `python main.py` again |
 | `Cannot write to phonsobon/...` | the token needs write permission, or use `--no-push` |
 | `ModuleNotFoundError` | activate `.venv` and run from the project folder |
+
+## Training on Kaggle (free GPU T4 x2)
+
+Upload `kaggle_train.ipynb` to Kaggle (*Create → New Notebook → File → Import Notebook*), then:
+
+1. **Settings:** Accelerator **GPU T4 x2**, Internet **on**.
+2. **Hugging Face login** (a token with write permission):
+   - interactive run: the login cell shows a `notebook_login()` box; log in, then run the next cells;
+   - background run (*Save & Run All*): add **Add-ons → Secrets → `HF_TOKEN`** (no box can be filled there).
+
+   `GITHUB_TOKEN` secret only if the GitHub repo is private.
+3. Put your GitHub repo URL in the first code cell. Try `QUICK = True` once first.
+4. **Save Version → Save & Run All** (runs in the background, up to 12 h).
+
+T4 has no fast bf16, so ByT5 trains in fp32 on both GPUs (`torchrun`) and is slower than on a 3090.
+Kaggle gives ~30 GPU hours per week and stops a session after 12 h, so training is built to resume.
+Everything goes to the **public** model repo `phonsobon/khmer-spell-checker`:
+
+| In the repo | What | When |
+|---|---|---|
+| `last-checkpoint/` | newest ByT5 checkpoint (model + optimizer) | every 2,000 steps |
+| root, `speller/` | final ByT5 model; tagger, lexicon, G2P, ranking weights | at the end |
+| `training-state/` | data, lexicon, G2P/tagger resume states (`*.resume`) | every 10 minutes |
+
+**After any stop** (time limit, network error, crash) **run the notebook again**: it downloads
+`training-state/`, finished steps are skipped, the G2P and the tagger continue from their `.resume`
+state (the tagger even mid-epoch) and ByT5 continues from `last-checkpoint/`.
+The same works on your PC: rerun `python main.py` after an interruption.
+
+| Problem | Fix |
+|---|---|
+| `CUDA out of memory` in ByT5 | `PER_DEVICE_BATCH = 8` |
+| ByT5 hangs at the start with 2 GPUs | add `env["NCCL_P2P_DISABLE"] = "1"` in the train cell |
+| `Repository not found` when cloning | private repo: add the `GITHUB_TOKEN` secret |
 
 ## After the first model
 

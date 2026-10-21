@@ -22,6 +22,14 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")   # harmless on Wi
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "120")         # slow networks: wait 2 min, not 10 s
 os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
 
+def bf16_ok():
+    """bf16 only on GPUs that run it natively (Ampere+: RTX 30xx, A100...). On older GPUs
+    (Kaggle/Colab T4) torch emulates bf16 very slowly, so train in fp32 there instead."""
+    import torch
+
+    return torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
+
+
 # ---- output files -------------------------------------------------------------
 OUT = Path(os.environ.get("KHSPELL_OUTPUTS", ROOT / "outputs"))
 DATA_DIR = OUT / "data"

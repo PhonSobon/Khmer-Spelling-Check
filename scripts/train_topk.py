@@ -9,8 +9,10 @@ Each training example is one word of a sentence, misspelled 80% of the time, wit
 its surrounding text as context. New errors are drawn every time (khspell.noise).
 """
 import argparse
+import os
 import random
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -38,7 +40,7 @@ def main():
     ap.add_argument("--eval-steps", type=int, default=2000)
     ap.add_argument("--n-dev", type=int, default=1000)
     ap.add_argument("--scale-test", action="store_true", help="use 50k sentences only")
-    ap.add_argument("--push-to-hub", default=None, help="e.g. phonsobon/khmer-topk-speller (private)")
+    ap.add_argument("--push-to-hub", default=None, help="e.g. phonsobon/khmer-spell-checker (public)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--resume", action="store_true", help="continue from the last checkpoint in --out")
     args = ap.parse_args()
@@ -78,14 +80,16 @@ def main():
         hyp = tok.batch_decode(preds, skip_special_tokens=True)
         return {"acc@1": float(np.mean([h == g for h, g in zip(hyp, gold)]))}
 
-    bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+    bf16 = config.bf16_ok()                      # T4: fp32 (never fp16 for T5-family models)
     per_dev = min(args.per_device_batch, args.batch)
+    n_proc = int(os.environ.get("WORLD_SIZE", 1))  # GPUs under torchrun: --batch stays the total batch
     targs = Seq2SeqTrainingArguments(
         output_dir=args.out,
         max_steps=args.max_steps,
         per_device_train_batch_size=per_dev,
         per_device_eval_batch_size=per_dev,
-        gradient_accumulation_steps=max(1, args.batch // per_dev),
+        gradient_accumulation_steps=max(1, args.batch // (per_dev * n_proc)),
+        ddp_find_unused_parameters=False,
         learning_rate=args.lr,
         lr_scheduler_type="linear",
         warmup_steps=min(1000, args.max_steps // 10),
@@ -107,17 +111,25 @@ def main():
         seed=args.seed,
         push_to_hub=bool(args.push_to_hub),
         hub_model_id=args.push_to_hub,
-        hub_private_repo=True,
+        hub_private_repo=False,
+        hub_strategy="checkpoint",               # every save also uploads last-checkpoint/ (for resume)
     )
     trainer = Seq2SeqTrainer(model=model, args=targs, train_dataset=train_ds, eval_dataset=dev_ds,
                              data_collator=DataCollatorForSeq2Seq(tok, model=model), processing_class=tok,
                              compute_metrics=compute_metrics)
     trainer.train(resume_from_checkpoint=True if args.resume else None)
     trainer.save_model(args.out)
-    tok.save_pretrained(args.out)
+    if trainer.is_world_process_zero():
+        tok.save_pretrained(args.out)
     print(trainer.evaluate())
     if args.push_to_hub:
-        trainer.push_to_hub()
+        for attempt in range(1, 6):              # the model is saved locally already: only retry the upload
+            try:
+                trainer.push_to_hub()
+                break
+            except Exception as e:
+                print(f"upload failed ({type(e).__name__}: {e}), retry {attempt}/5 in {30 * attempt}s", flush=True)
+                time.sleep(30 * attempt)
 
 
 if __name__ == "__main__":

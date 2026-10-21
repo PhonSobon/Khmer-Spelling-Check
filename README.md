@@ -92,3 +92,31 @@ sp = Speller.load()
 text, errors = sp.check("ខ្ញុំជាសស្សដែលមានសក្សានៅកម្ពុច", k=3)
 sp.suggest("សំណើរ", k=3)
 ```
+
+## Citation
+
+If you use this project, please cite:
+
+```bibtex
+@misc{khmerspell2026,
+  author = {Phon Sobon},
+  title = {Khmer Spell Checker: Error Detection and Top-k Correction for Khmer},
+  year = {2026},
+  publisher = {GitHub},
+  journal = {GitHub repository},
+  howpublished = {\url{https://github.com/PhonSobon/Khmer-Spelling-Check}},
+  note = {Open source Khmer spell checker: character tagger for word segmentation and error detection, ByT5 corrector, Transformer G2P for same-sound spellings, trained on real and synthetic misspellings}
+}
+```
+
+## Credits
+
+**Author:** Phon Sobon, MPTC AI ([Hugging Face: phonsobon](https://huggingface.co/phonsobon), khemthay0118@gmail.com)
+
+**Data and research this project builds on:**
+- *Khmer Dictionary 2022*, Royal Academy of Cambodia (RAC), via `seanghay/khmer-dictionary-44k` (research use only)
+- Real misspellings: `seanghay/khmer-spelling-corrections`, `S-Sethisak/khmer-orthography-correction-dataset`
+- Text: `nphearum/khmer-raw-text-3M-v2`, `CADT-IDRI/Khmer_News_classification_unsegmented`, `navinnseab/khmer-wikipedia-article`
+- Word segmentation: [khmer-nltk](https://github.com/VietHoang1512/khmer-nltk)
+- Method: Buoy et al., *Khmer Spellchecking: A Holistic Approach* (arXiv 2511.09812)
+- Base model: [`google/byt5-small`](https://huggingface.co/google/byt5-small)
