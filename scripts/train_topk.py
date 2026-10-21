@@ -9,6 +9,7 @@ Each training example is one word of a sentence, misspelled 80% of the time, wit
 its surrounding text as context. New errors are drawn every time (khspell.noise).
 """
 import argparse
+import math
 import os
 import random
 import sys
@@ -33,6 +34,8 @@ def main():
     ap.add_argument("--model", default="google/byt5-small")
     ap.add_argument("--out", default=str(config.TOPK_DIR))
     ap.add_argument("--max-steps", type=int, default=30_000)
+    ap.add_argument("--epochs", type=float, default=None,
+                    help="train this many passes over ALL training sentences (replaces --max-steps)")
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--per-device-batch", type=int, default=64)
     ap.add_argument("--lr", type=float, default=5e-4)
@@ -56,7 +59,10 @@ def main():
     # fixed dev examples (same misspellings every evaluation)
     drng = random.Random(0)
     dev_pairs = [p for p in (make_example(list(t), drng) for t in dev_df["tokens"]) if p]
-    print(f"train {len(train_df):,} sentences | dev {len(dev_pairs):,} words")
+    if args.epochs:                              # one step = --batch sentences (all GPUs together)
+        args.max_steps = math.ceil(args.epochs * len(train_df) / args.batch)
+    print(f"train {len(train_df):,} sentences | dev {len(dev_pairs):,} words | {args.max_steps:,} steps"
+          f" = {args.max_steps * args.batch / len(train_df):.2f} epochs")
 
     def encode(srcs, tgts):
         enc = tok(srcs, max_length=384, truncation=True)

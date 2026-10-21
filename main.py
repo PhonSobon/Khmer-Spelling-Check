@@ -37,7 +37,7 @@ sys.path.insert(0, str(ROOT))
 from khspell import config, resume  # noqa: E402  (config also loads .env)
 
 DEFAULT_HUB_REPO = "phonsobon/khmer-spell-checker"
-TAGGER_EPOCHS = 6       # 3 was not enough: the dev scores still rose a lot in epoch 3 (seg F1 0.719 -> 0.757)
+TAGGER_EPOCHS = 10      # 3 was not enough: the dev scores still rose a lot in epoch 3 (seg F1 0.719 -> 0.757)
 TAGGER_LR = 3e-4        # 5e-4 kept the loss flat for the whole first epoch
 DATA_VERSION_FILE = config.DATA_DIR / "VERSION.txt"
 
@@ -164,6 +164,8 @@ def main():
     ap.add_argument("--retrain", action="store_true", help="train all models again")
     ap.add_argument("--rebuild-data", action="store_true", help="prepare the data (and lexicon) again")
     ap.add_argument("--steps", type=int, default=None, help="ByT5 training steps (default 30000, quick 3000)")
+    ap.add_argument("--byt5-epochs", type=float, default=None,
+                    help="ByT5: passes over ALL training sentences instead of --steps (1 epoch = ~20,500 steps)")
     ap.add_argument("--model", default="google/byt5-small", help="base model, e.g. google/byt5-base")
     ap.add_argument("--per-device-batch", type=int, default=None,
                     help="ByT5 batch per GPU (default 64; 8 for 15 GB GPUs like T4). Total batch stays 64")
@@ -242,6 +244,8 @@ def main():
     train, fresh = plan("ByT5", topk_dir, data_version, args.retrain, (topk_dir / "config.json").exists())
     if train:
         train_args = ["--model", args.model, "--max-steps", steps, "--out", topk_dir]
+        if args.byt5_epochs and not q:
+            train_args += ["--epochs", args.byt5_epochs]
         if fresh:                                        # old model and checkpoints: start over
             shutil.rmtree(topk_dir, ignore_errors=True)
             skip_id = hub_checkpoint_id(hub_repo) if hub_repo else None
