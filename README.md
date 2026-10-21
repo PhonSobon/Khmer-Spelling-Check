@@ -111,7 +111,7 @@ If you use this project, please cite:
 
 ## Credits
 
-**Author:** Phon Sobon, MPTC AI ([Hugging Face: phonsobon](https://huggingface.co/phonsobon), khemthay0118@gmail.com)
+**Author:** Phon Sobon, MPTC AI ([Hugging Face: phonsobon](https://huggingface.co/phonsobon), phon.sobon02@gmail.com)
 
 **Data and research this project builds on:**
 - *Khmer Dictionary 2022*, Royal Academy of Cambodia (RAC), via `seanghay/khmer-dictionary-44k` (research use only)
