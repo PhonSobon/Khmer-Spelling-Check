@@ -2,7 +2,8 @@
 import random
 import re
 
-from . import real_typos
+from . import config, real_typos
+from .names import name_positions
 from .normalize import clusters, normalize
 
 VOWEL_SWAPS = ["ុូ", "ិី", "ឹឺ", "េែ", "ែៃ", "ោៅ", "ៀឿ", "ួូ", "ះៈ"]
@@ -129,7 +130,23 @@ def corrupt(word, rng=random, is_valid=None, n_ops=None, tries=20):
 
 
 # ---------------------------------------------------------------- sentences
-N_ERRORS = [(0, 0.15), (1, 0.35), (2, 0.25), (3, 0.15), (4, 0.10)]   # errors per sentence
+_known = None
+
+
+def _is_known():
+    """Lexicon lookup for spotting names (loaded once); before the lexicon exists every word
+    after a title / head word counts as a possible name."""
+    global _known
+    if _known is None:
+        _known = lambda w: False                     # noqa: E731
+        if config.LEXICON_TSV.exists():
+            from .lexicon import Lexicon
+            lex = Lexicon.load()
+            _known = lex.__contains__
+    return _known
+
+
+N_ERRORS =[(0, 0.15), (1, 0.35), (2, 0.25), (3, 0.15), (4, 0.10)]   # errors per sentence
 
 
 def noisy_tokens(tokens, rng=random, n_errors=None):
@@ -142,7 +159,8 @@ def noisy_tokens(tokens, rng=random, n_errors=None):
         n_errors = rng.choices(*zip(*N_ERRORS))[0]
     toks = list(tokens)
     flags = [False] * len(toks)
-    idx = [i for i, t in enumerate(toks) if is_khmer_token(t)]
+    names = name_positions(toks, _is_known())          # never misspell a name (លោក ដារ៉ា, ខេត្ត តូក្យូ)
+    idx = [i for i, t in enumerate(toks) if is_khmer_token(t) and i not in names]
     rng.shuffle(idx)
     done = 0
     for i in idx:

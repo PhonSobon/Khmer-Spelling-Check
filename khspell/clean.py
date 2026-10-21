@@ -16,10 +16,9 @@ MIN_KHMER_RATIO = 0.6        # Khmer letters among non-space characters (drops n
 
 _QUOTES = re.compile(r"[\"'`“”„‟«»‘’‚‹›]")
 _LATIN = re.compile(r"[A-Za-zÀ-ɏ]")
-# everything that is allowed; any other character rejects the sentence
 _ALLOWED = re.compile(r"^[ក-៿᧠-᧿ 0-9.,!?:;%()\-–]+$")
 _REPEAT_PUNCT = re.compile(r"([.,!?:;\-–។៕៖])\1+")
-_REPEAT_CHAR = re.compile(r"(.{1,3})\1{3,}")     # a character or cluster 4+ times: ស់ស់ស់ស់, ហាហាហាហា
+_REPEAT_CHAR = re.compile(r"(.{1,3})\1{3,}")     
 _SPACES = re.compile(r"\s+")
 _SPACE_BEFORE_PUNCT = re.compile(r"\s+([.,!?:;។៕៖])")
 _EDGE_JUNK = re.compile(r"^[\s\-–.,:;]+|[\s\-–,:;]+$")

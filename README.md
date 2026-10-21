@@ -58,6 +58,12 @@ Real Khmer typos are rare, so the models learn from **clean sentences with reali
 - any sentence with English letters, other scripts, emoji or markup is dropped (about 20% of the raw text);
 - keyboard noise (`ណាស់ស់ស់ស់`), duplicates and very short lines are removed.
 
+**Names** (people, places, organizations) are not misspellings. An unknown word right after a title or
+head word (`លោក ដារ៉ា`, `ខេត្ត តូក្យូ`, `ធនាគារ អេស៊ីលីដា`) is treated as a name (`khspell/names.py`): it is
+not flagged, never misspelled in training, and frequent ones are added to the lexicon. On the unseen names of
+`phonsobon/khmer-ner-dataset-clean` this removes 77% of the false alarms on person names and all of them
+on organizations and places, at the cost of ~5% of typos that sit right after a title.
+
 **Evaluation** uses held-out sentences, plus **917 real misspellings** users actually typed (`seanghay/khmer-spelling-corrections`, never used for training).
 
 ## Files

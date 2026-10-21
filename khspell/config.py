@@ -46,12 +46,15 @@ LOG = OUT / "main.log"
 
 # ---- datasets -----------------------------------------------------------------
 DICT_ID = "seanghay/khmer-dictionary-44k"                  # official dictionary + pronunciations
+PRON_DICT_ID = "phonsobon/khmer-pronunciation-dictionary"  # 44k + khmerpronounce combined, errors fixed (G2P)
 REAL_TYPOS_ID = "seanghay/khmer-spelling-corrections"      # 917 real misspellings (test only)
 
 # ---- lexicon ------------------------------------------------------------------
 CORPUS_MIN_FREQ = 20          # a word not in the dictionary is trusted when it appears this often
 CORPUS_NEIGHBOR_RATIO = 5.0   # ...unless it is a rare near-copy of a much more frequent dictionary word
 SINGLE_CLUSTER_MIN_FREQ = 300 # one-cluster words (ជា, នៅ ...) only count as words when frequent
+NAME_MIN_FREQ = 5             # an unknown word seen this often right after a title / head word (លោក, ខេត្ត ...)
+NAME_MIN_RATIO = 0.5          # ...in at least this share of its occurrences is added as a name (khspell/names.py)
 
 # ---- candidate search ---------------------------------------------------------
 MAX_GRAPHEME_DIST = 2   # spelling edits (grapheme clusters) when searching the lexicon

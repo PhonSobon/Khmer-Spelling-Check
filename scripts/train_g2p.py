@@ -15,23 +15,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import torch
 import torch.nn as nn
 
-from khspell import config, hf, resume
+from khspell import config, resume
 from khspell.distance import levenshtein
 from khspell.g2p import G2P, PAD, CharVocab, Seq2SeqTransformer, pad_batch
-from khspell.normalize import is_khmer_word, normalize
-from khspell.phonetics import phones, split_alternatives
+from khspell.normalize import is_khmer_word
+from khspell.phonetics import dictionary_pronunciations, phones
 
 
 def load_pairs():
-    ds = hf.load(config.DICT_ID)
     pairs = {}
-    for w, pro in zip(ds["word"], ds["pro"]):
-        w = normalize(w)
-        if not is_khmer_word(w) or not pro:
-            continue
-        alts = split_alternatives(pro)
-        if alts and all(is_khmer_word(a.replace("-", "")) for a in alts):
-            pairs.setdefault(w, alts[0])   # first listed pronunciation is the main one
+    for w, alts in dictionary_pronunciations().items():
+        if is_khmer_word(w) and all(is_khmer_word(a.replace("-", "")) for a in alts):
+            pairs[w] = alts[0]             # first listed pronunciation is the main one
     return sorted(pairs.items())
 
 

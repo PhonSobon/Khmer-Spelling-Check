@@ -71,6 +71,25 @@ def split_alternatives(pro: str):
     return out
 
 
+def dictionary_pronunciations():
+    """{word: [pronunciations, main first]} from the combined pronunciation dictionary
+    (config.PRON_DICT_ID), or from the 44k dictionary if that cannot be loaded."""
+    from . import config, hf
+
+    try:
+        ds = hf.load(config.PRON_DICT_ID)
+        return {normalize(w): list(alts) for w, alts in zip(ds["word"], ds["alternatives"]) if alts}
+    except Exception as e:
+        print(f"(could not load {config.PRON_DICT_ID}: {type(e).__name__}; using {config.DICT_ID})", flush=True)
+    out = {}
+    ds = hf.load(config.DICT_ID)
+    for w, pro in zip(ds["word"], ds["pro"]):
+        for a in split_alternatives(pro or ""):
+            if a not in out.setdefault(normalize(w), []):
+                out[normalize(w)].append(a)
+    return {w: alts for w, alts in out.items() if alts}
+
+
 def phones(pron: str):
     """Pronunciation respelling (syllables joined by '-') -> phone token list."""
     toks = []

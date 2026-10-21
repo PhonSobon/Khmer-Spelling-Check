@@ -151,7 +151,7 @@ def main():
         check_hub(hub_repo)
 
     # 2 --------------------------------------------------------------------------
-    data_version = f"scale={scale} cleaning=khmer-only-v1 sources=lm-corpus+real-typos-v2"
+    data_version = f"scale={scale} cleaning=khmer-only-v1 sources=lm-corpus+real-typos-v2 names-v1"
     built = DATA_VERSION_FILE.read_text().strip() if DATA_VERSION_FILE.exists() else None
     new_data = args.rebuild_data or built != data_version
     if new_data:

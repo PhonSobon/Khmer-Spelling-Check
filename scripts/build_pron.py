@@ -1,6 +1,7 @@
 """Step 4b: pronunciations for every lexicon word -> outputs/pron.tsv.
 
-Dictionary words use the official `pro`; other words are pronounced by the G2P model.
+Dictionary words use the combined pronunciation dictionary (config.PRON_DICT_ID);
+other words are pronounced by the G2P model.
     python scripts/build_pron.py
 """
 import csv
@@ -11,24 +12,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tqdm import tqdm
 
-from khspell import config, hf
+from khspell import config
 from khspell.g2p import G2P
 from khspell.lexicon import Lexicon
-from khspell.normalize import normalize
-from khspell.phonetics import split_alternatives
+from khspell.phonetics import dictionary_pronunciations
 
 
 def main():
     lex = Lexicon.load()
-    gold = {}
-    ds = hf.load(config.DICT_ID)
-    for w, pro in zip(ds["word"], ds["pro"]):
-        w = normalize(w)
-        if w in lex and pro:
-            for a in split_alternatives(pro):
-                gold.setdefault(w, [])
-                if a not in gold[w]:
-                    gold[w].append(a)
+    gold = {w: alts for w, alts in dictionary_pronunciations().items() if w in lex}
     todo = [w for w in lex.words() if w not in gold]
     print(f"{len(gold):,} words with dictionary pronunciation, {len(todo):,} need G2P")
     g2p = G2P.load(config.G2P_CKPT)

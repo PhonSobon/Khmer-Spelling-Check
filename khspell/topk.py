@@ -22,6 +22,7 @@ import os
 import torch
 
 from . import config
+from .names import name_positions
 from .noise import corrupt, is_khmer_token
 from .normalize import normalize
 
@@ -185,9 +186,13 @@ class Speller:
         """(normalised text, [{start, end, word, error_prob, suggestions: [(word, prob)]}])"""
         text = normalize(text)
         errors = []
-        for s, e, w, p_err in self.words(text):
+        words = self.words(text)
+        names = name_positions([w for _, _, w, _ in words], self.gen.is_known) if self.gen is not None else set()
+        for i, (s, e, w, p_err) in enumerate(words):
             if not is_khmer_token(w):
                 continue                           # English, numbers, punctuation: not checked
+            if i in names:
+                continue                           # unknown word after លោក / ខេត្ត / ក្រុមហ៊ុន ...: a name
             if p_err is not None and p_err < tag_threshold:
                 continue                           # the tagger says the word is fine
             ranked = self.rank(w, text[:s], text[e:])
