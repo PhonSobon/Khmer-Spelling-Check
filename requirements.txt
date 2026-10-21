@@ -1,0 +1,13 @@
+torch>=2.2
+datasets>=2.19
+huggingface_hub
+python-dotenv
+numpy
+tqdm
+fastapi
+uvicorn
+khmer-nltk
+pandas
+pyarrow
+transformers>=4.46
+hf_xet
